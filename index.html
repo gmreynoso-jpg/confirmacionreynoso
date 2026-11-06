@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#7f1d1d">
+<title>Confirmar asistencia</title>
+<style>
+:root{--bg:#f6f7f9;--text:#1f2937;--muted:#6b7280;--green:#166534;--red:#b91c1c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+.wrap{min-height:100vh;display:grid;place-items:center;padding:18px}.card{width:100%;max-width:480px;background:#fff;border-radius:24px;padding:30px 20px;text-align:center;box-shadow:0 12px 50px rgba(0,0,0,.08)}
+.small{font-size:13px;color:var(--muted)}h1{font-size:25px;margin:8px 0}.name{font-size:31px;font-weight:900;margin:20px 0}.actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:24px}.btn{border:0;border-radius:16px;padding:18px;font-size:18px;font-weight:850;cursor:pointer}.yes{background:var(--green);color:#fff}.no{background:var(--red);color:#fff}.hidden{display:none!important}
+@media(max-width:420px){.actions{grid-template-columns:1fr}}
+</style>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="small">Confirmación de asistencia</div>
+    <h1 id="meeting"></h1>
+    <div id="date" class="small"></div>
+    <div id="name" class="name"></div>
+    <div id="question">¿Vas a asistir?</div>
+    <div id="actions" class="actions">
+      <button class="btn yes" onclick="respond('Sí')">Sí, voy</button>
+      <button class="btn no" onclick="respond('No')">No voy</button>
+    </div>
+    <div id="result" style="margin-top:18px;font-weight:800"></div>
+  </div>
+</div>
+<script>
+const cfg=window.APP_CONFIG||{};
+const token=new URLSearchParams(location.search).get('token');
+const sb=supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
+
+function fmtDate(d){if(!d)return'';const [y,m,day]=d.split('-');return `${day}/${m}/${y}`}
+async function init(){
+  if(!token){name.textContent='Enlace no válido';actions.classList.add('hidden');question.classList.add('hidden');return}
+  const {data,error}=await sb.rpc('get_invitation',{p_token:token});
+  if(error||!data?.length){name.textContent='Enlace no válido o caducado';actions.classList.add('hidden');question.classList.add('hidden');return}
+  const x=data[0];meeting.textContent=x.meeting_name;date.textContent=fmtDate(x.meeting_date);name.textContent=x.participant_name;
+  if(x.attendance_status==='Sí')result.textContent='✅ Actualmente has confirmado que vas.';
+  if(x.attendance_status==='No')result.textContent='❌ Actualmente has indicado que no vas.';
+}
+async function respond(v){
+  document.querySelectorAll('.btn').forEach(b=>b.disabled=true);result.textContent='Guardando respuesta...';
+  const {data,error}=await sb.rpc('respond_invitation',{p_token:token,p_response:v});
+  result.textContent=(!error&&data===true)?(v==='Sí'?'✅ Confirmado: Sí, voy.':'✅ Confirmado: No voy.'):'No se pudo guardar la respuesta.';
+  document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
+}
+init();
+</script>
+</body>
+</html>
