@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#7f1d1d">
-<title>Confirmar asistencia</title>
+<title>Invitación</title>
 <style>
-:root{--bg:#f6f7f9;--text:#1f2937;--muted:#6b7280;--green:#166534;--red:#b91c1c}
+:root{--bg:#f6f7f9;--text:#1f2937;--muted:#6b7280;--green:#166534;--red:#b91c1c;--primary:#7f1d1d}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
-.wrap{min-height:100vh;display:grid;place-items:center;padding:18px}.card{width:100%;max-width:480px;background:#fff;border-radius:24px;padding:30px 20px;text-align:center;box-shadow:0 12px 50px rgba(0,0,0,.08)}
-.small{font-size:13px;color:var(--muted)}h1{font-size:25px;margin:8px 0}.name{font-size:31px;font-weight:900;margin:20px 0}.actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:24px}.btn{border:0;border-radius:16px;padding:18px;font-size:18px;font-weight:850;cursor:pointer}.yes{background:var(--green);color:#fff}.no{background:var(--red);color:#fff}.hidden{display:none!important}
-@media(max-width:420px){.actions{grid-template-columns:1fr}}
+.wrap{min-height:100vh;display:grid;place-items:center;padding:18px}.card{width:100%;max-width:520px;background:#fff;border-radius:24px;padding:30px 22px;text-align:center;box-shadow:0 12px 50px rgba(0,0,0,.08)}
+.small{font-size:13px;color:var(--muted)}h1{font-size:28px;margin:8px 0}.name{font-size:30px;font-weight:900;margin:18px 0 8px}.message{white-space:pre-wrap;line-height:1.5;margin:18px 0}.details{background:#faf7f5;border-radius:16px;padding:14px;text-align:left;margin:18px 0}.details div{margin:6px 0}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px}.btn{border:0;border-radius:16px;padding:16px;font-size:17px;font-weight:850;cursor:pointer;text-decoration:none;display:inline-block}.yes{background:var(--green);color:#fff}.no{background:var(--red);color:#fff}.secondary{background:#fff;color:var(--primary);border:1px solid #d1d5db}.hidden{display:none!important}.calendar{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+@media(max-width:420px){.actions,.calendar{grid-template-columns:1fr}}
 </style>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -18,11 +19,20 @@
 <body>
 <div class="wrap">
   <div class="card">
-    <div class="small">Confirmación de asistencia</div>
+    <div class="small">Invitación al evento</div>
     <h1 id="meeting"></h1>
-    <div id="date" class="small"></div>
     <div id="name" class="name"></div>
-    <div id="question">¿Vas a asistir?</div>
+    <div id="message" class="message"></div>
+    <div id="details" class="details hidden">
+      <div id="dateRow"></div>
+      <div id="placeRow"></div>
+      <div id="mapRow"></div>
+    </div>
+    <div id="calendarBlock" class="calendar hidden">
+      <a id="googleCalendar" class="btn secondary" target="_blank">📅 Google Calendar</a>
+      <button class="btn secondary" onclick="downloadICS()">⬇️ Añadir al calendario</button>
+    </div>
+    <div id="question" style="margin-top:22px;font-weight:800">¿Podemos contar contigo?</div>
     <div id="actions" class="actions">
       <button class="btn yes" onclick="respond('Sí')">Sí, voy</button>
       <button class="btn no" onclick="respond('No')">No voy</button>
@@ -34,21 +44,75 @@
 const cfg=window.APP_CONFIG||{};
 const token=new URLSearchParams(location.search).get('token');
 const sb=supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_PUBLISHABLE_KEY);
+let invitation=null;
 
 function fmtDate(d){if(!d)return'';const [y,m,day]=d.split('-');return `${day}/${m}/${y}`}
+function pad(n){return String(n).padStart(2,'0')}
+function localDateTime(date,time,addHours=0){
+  if(!date)return null;
+  const t=time||'12:00';
+  const dt=new Date(`${date}T${t}:00`);
+  if(addHours)dt.setHours(dt.getHours()+addHours);
+  return dt;
+}
+function toGoogleDate(dt){
+  return dt.getUTCFullYear()+pad(dt.getUTCMonth()+1)+pad(dt.getUTCDate())+'T'+pad(dt.getUTCHours())+pad(dt.getUTCMinutes())+'00Z';
+}
+function toICSDate(dt){
+  return toGoogleDate(dt);
+}
+function buildCalendar(){
+  if(!invitation?.meeting_date)return;
+  const start=localDateTime(invitation.meeting_date,invitation.start_time||'12:00');
+  const end=invitation.end_time?localDateTime(invitation.meeting_date,invitation.end_time):localDateTime(invitation.meeting_date,invitation.start_time||'12:00',3);
+  const details=[invitation.invite_message||'',invitation.maps_url||''].filter(Boolean).join('\n\n');
+  const params=new URLSearchParams({
+    action:'TEMPLATE',
+    text:invitation.meeting_name,
+    dates:`${toGoogleDate(start)}/${toGoogleDate(end)}`,
+    details,
+    location:invitation.place||''
+  });
+  googleCalendar.href='https://calendar.google.com/calendar/render?'+params.toString();
+  calendarBlock.classList.remove('hidden');
+}
+function downloadICS(){
+  if(!invitation?.meeting_date)return;
+  const start=localDateTime(invitation.meeting_date,invitation.start_time||'12:00');
+  const end=invitation.end_time?localDateTime(invitation.meeting_date,invitation.end_time):localDateTime(invitation.meeting_date,invitation.start_time||'12:00',3);
+  const escICS=s=>String(s||'').replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;');
+  const uid=`${token}@reunionesreynoso`;
+  const desc=[invitation.invite_message||'',invitation.maps_url||''].filter(Boolean).join('\n\n');
+  const ics=[
+    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Reuniones Reynoso//ES','CALSCALE:GREGORIAN','METHOD:PUBLISH',
+    'BEGIN:VEVENT',`UID:${uid}`,`DTSTAMP:${toICSDate(new Date())}`,`DTSTART:${toICSDate(start)}`,`DTEND:${toICSDate(end)}`,
+    `SUMMARY:${escICS(invitation.meeting_name)}`,`LOCATION:${escICS(invitation.place||'')}`,`DESCRIPTION:${escICS(desc)}`,
+    'BEGIN:VALARM','TRIGGER:-P1D','ACTION:DISPLAY',`DESCRIPTION:Recordatorio: ${escICS(invitation.meeting_name)}`,'END:VALARM',
+    'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+  const blob=new Blob([ics],{type:'text/calendar;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='invitacion.ics';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 async function init(){
   if(!token){name.textContent='Enlace no válido';actions.classList.add('hidden');question.classList.add('hidden');return}
   const {data,error}=await sb.rpc('get_invitation',{p_token:token});
   if(error||!data?.length){name.textContent='Enlace no válido o caducado';actions.classList.add('hidden');question.classList.add('hidden');return}
-  const x=data[0];meeting.textContent=x.meeting_name;date.textContent=fmtDate(x.meeting_date);name.textContent=x.participant_name;
-  if(x.attendance_status==='Sí')result.textContent='✅ Actualmente has confirmado que vas.';
-  if(x.attendance_status==='No')result.textContent='❌ Actualmente has indicado que no vas.';
+  invitation=data[0];
+  meeting.textContent=invitation.meeting_name;
+  name.textContent=invitation.participant_name;
+  message.textContent=invitation.invite_message||'Nos gustaría mucho contar contigo en este evento.';
+  details.classList.remove('hidden');
+  dateRow.textContent=invitation.meeting_date?`📅 ${fmtDate(invitation.meeting_date)}${invitation.start_time?' · '+String(invitation.start_time).slice(0,5):''}${invitation.end_time?' - '+String(invitation.end_time).slice(0,5):''}`:'';
+  placeRow.textContent=invitation.place?`📍 ${invitation.place}`:'';
+  if(invitation.maps_url){mapRow.innerHTML=`🗺️ <a href="${invitation.maps_url}" target="_blank" rel="noopener">Ver ubicación en Google Maps</a>`}
+  buildCalendar();
+  if(invitation.attendance_status==='Sí')result.textContent='✅ Ya has confirmado que vas.';
+  if(invitation.attendance_status==='No')result.textContent='❌ Has indicado que no vas.';
 }
 async function respond(v){
-  document.querySelectorAll('.btn').forEach(b=>b.disabled=true);result.textContent='Guardando respuesta...';
+  document.querySelectorAll('.actions .btn').forEach(b=>b.disabled=true);result.textContent='Guardando respuesta...';
   const {data,error}=await sb.rpc('respond_invitation',{p_token:token,p_response:v});
-  result.textContent=(!error&&data===true)?(v==='Sí'?'✅ Confirmado: Sí, voy.':'✅ Confirmado: No voy.'):'No se pudo guardar la respuesta.';
-  document.querySelectorAll('.btn').forEach(b=>b.disabled=false);
+  result.textContent=(!error&&data===true)?(v==='Sí'?'✅ ¡Gracias! Hemos registrado que asistirás.':'✅ Gracias. Hemos registrado que no podrás asistir.'):'No se pudo guardar la respuesta.';
+  document.querySelectorAll('.actions .btn').forEach(b=>b.disabled=false);
 }
 init();
 </script>
